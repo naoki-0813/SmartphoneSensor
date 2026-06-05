@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>G-METER / 速度・加速度テレメトリ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Azeret+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#06080c;
+    --panel:#0d1219;
+    --line:#1c2733;
+    --dim:#5c6b7a;
+    --txt:#e8eef5;
+    --accel:#7dff3b;   /* 加速 = ライムグリーン */
+    --brake:#ff3b56;   /* ブレーキ = レッド */
+    --lat:#23d6ff;     /* 横G = シアン */
+    --speed:#ffd23b;   /* 速度 = アンバー */
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    background:
+      radial-gradient(120% 80% at 50% -10%, #10202c 0%, var(--bg) 55%),
+      var(--bg);
+    color:var(--txt);
+    font-family:"Chakra Petch","Hiragino Sans","Yu Gothic",sans-serif;
+    overflow:hidden;
+    -webkit-user-select:none;user-select:none;
+  }
+  .mono{font-family:"Azeret Mono",monospace;font-variant-numeric:tabular-nums;}
+
+  /* ===== スタート画面 ===== */
+  #intro{
+    position:fixed;inset:0;z-index:50;
+    display:flex;flex-direction:column;justify-content:center;align-items:center;
+    padding:32px;text-align:center;gap:20px;
+    background:radial-gradient(130% 90% at 50% 0%, #122230 0%, #06080c 60%);
+  }
+  #intro h1{font-size:clamp(28px,9vw,54px);font-weight:700;letter-spacing:4px;}
+  #intro h1 span{color:var(--accel);}
+  #intro p{color:var(--dim);max-width:440px;line-height:1.8;font-size:14px;}
+  .steps{text-align:left;max-width:420px;color:#9fb0c0;font-size:13px;line-height:1.9;
+    border-left:2px solid var(--line);padding-left:16px;}
+  .steps b{color:var(--lat);}
+  #startBtn{
+    margin-top:8px;font-family:"Chakra Petch";font-weight:700;font-size:20px;letter-spacing:3px;
+    color:#06080c;background:var(--accel);border:none;border-radius:14px;
+    padding:18px 52px;cursor:pointer;transition:transform .12s, box-shadow .12s;
+    box-shadow:0 0 0 1px rgba(125,255,59,.4),0 8px 30px rgba(125,255,59,.25);
+  }
+  #startBtn:active{transform:scale(.96);}
+
+  /* ===== HUD ===== */
+  #hud{position:fixed;inset:0;display:none;flex-direction:column;padding:14px;gap:12px;}
+  .row{display:flex;gap:12px;}
+
+  /* 速度パネル */
+  .speedbox{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:14px 18px;display:flex;align-items:baseline;justify-content:space-between;}
+  .speedbox .label{color:var(--dim);font-size:12px;letter-spacing:2px;}
+  .speed-val{font-size:clamp(48px,16vw,84px);font-weight:800;color:var(--speed);line-height:.9;}
+  .speed-unit{color:var(--dim);font-size:16px;margin-left:6px;}
+
+  /* g-g ダイアグラム */
+  .gg-wrap{flex:1;display:flex;justify-content:center;align-items:center;min-height:0;}
+  .gg{position:relative;aspect-ratio:1;width:min(74vw,360px);max-height:100%;
+    background:radial-gradient(circle at 50% 50%, #0f1722 0%, #0a0e14 70%);
+    border-radius:50%;border:1px solid var(--line);}
+  .ring{position:absolute;border-radius:50%;border:1px dashed #233140;inset:50%;transform:translate(-50%,-50%);}
+  .ring.r10{width:100%;height:100%;border-style:solid;border-color:#2a3a4a;}
+  .ring.r05{width:50%;height:50%;}
+  .axis{position:absolute;background:#1b2632;}
+  .axis.v{left:50%;top:6%;bottom:6%;width:1px;transform:translateX(-.5px);}
+  .axis.h{top:50%;left:6%;right:6%;height:1px;transform:translateY(-.5px);}
+  .gg-label{position:absolute;font-size:11px;letter-spacing:1px;color:var(--dim);}
+  .gg-label.t{top:8px;left:50%;transform:translateX(-50%);color:var(--accel);}
+  .gg-label.b{bottom:8px;left:50%;transform:translateX(-50%);color:var(--brake);}
+  .gg-label.l{left:10px;top:50%;transform:translateY(-50%);color:var(--lat);}
+  .gg-label.r{right:10px;top:50%;transform:translateY(-50%);color:var(--lat);}
+  .gg-tick{position:absolute;font-size:9px;color:#3a4a5a;left:calc(50% + 4px);}
+  #dot{position:absolute;width:26px;height:26px;border-radius:50%;
+    left:50%;top:50%;transform:translate(-50%,-50%);
+    background:radial-gradient(circle at 35% 35%, #ffffff, var(--accel));
+    box-shadow:0 0 18px var(--accel),0 0 6px #fff;transition:background .15s,box-shadow .15s;}
+  #trail{position:absolute;width:8px;height:8px;border-radius:50%;left:50%;top:50%;
+    transform:translate(-50%,-50%);background:#fff;opacity:.18;}
+
+  /* 数値パネル群 */
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:9px 6px;text-align:center;}
+  .card .k{font-size:10px;color:var(--dim);letter-spacing:1px;}
+  .card .v{font-size:clamp(18px,6.2vw,26px);font-weight:800;line-height:1.15;}
+  .card .u{font-size:9px;color:var(--dim);}
+
+  /* ピーク */
+  .peaks{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  .peak{background:#0a0e14;border:1px solid #15202b;border-radius:10px;padding:7px 4px;text-align:center;}
+  .peak .k{font-size:9px;color:#46566a;letter-spacing:.5px;}
+  .peak .v{font-size:15px;font-weight:600;}
+
+  /* ボタン */
+  .btns{display:flex;gap:8px;}
+  .btn{flex:1;background:#101824;border:1px solid var(--line);color:var(--txt);
+    border-radius:12px;padding:13px 6px;font-family:"Chakra Petch";font-weight:600;
+    font-size:13px;letter-spacing:1px;cursor:pointer;transition:background .12s,transform .1s;}
+  .btn:active{transform:scale(.96);background:#16222f;}
+  .btn.zero{border-color:#2c4a2c;color:var(--accel);}
+  .btn.fwd{border-color:#234a52;color:var(--lat);}
+  .btn.reset{border-color:#4a2c34;color:var(--brake);}
+
+  /* ステータス */
+  #status{font-family:"Azeret Mono";font-size:11px;color:var(--dim);text-align:center;letter-spacing:.5px;
+    min-height:16px;line-height:1.4;}
+  #status .ok{color:var(--accel);} #status .ng{color:var(--brake);} #status .wait{color:var(--speed);}
+  .flash{animation:flash .6s ease;}
+  @keyframes flash{0%{background:#1b3a1b;}100%{background:var(--panel);}}
+</style>
+</head>
+<body>
+
+<!-- ===== スタート画面 ===== -->
+<div id="intro">
+  <h1>G-<span>METER</span></h1>
+  <p>スマホのGPSとモーションセンサーで、速度と「どの方向に何G」かかっているかを表示します。</p>
+  <div class="steps">
+    使い方<br>
+    1. スマホを車にしっかり固定（向きは自由）<br>
+    2. <b>スタート</b>を押してセンサーを許可<br>
+    3. 停車中に <b>ゼロ設定</b> を押す<br>
+    4. 直線でアクセルを踏みながら <b>前方向セット</b> を押すと前後/横が正確に
+  </div>
+  <button id="startBtn">スタート</button>
+  <p style="font-size:11px;opacity:.6">※ iPhoneはセンサー許可の確認が出ます。安全のため操作は停車中に。</p>
+</div>
+
+<!-- ===== HUD ===== -->
+<div id="hud">
+  <div class="row">
+    <div class="speedbox">
+      <span class="label">SPEED</span>
+      <div><span class="speed-val mono" id="speed">--</span><span class="speed-unit">km/h</span></div>
+    </div>
+  </div>
+
+  <div class="gg-wrap">
+    <div class="gg">
+      <div class="ring r10"></div>
+      <div class="ring r05"></div>
+      <div class="axis v"></div>
+      <div class="axis h"></div>
+      <span class="gg-tick" style="top:25%">1.0G</span>
+      <span class="gg-tick" style="top:38%">0.5G</span>
+      <div class="gg-label t">加速 ▲</div>
+      <div class="gg-label b">▼ ブレーキ</div>
+      <div class="gg-label l">◀ 左</div>
+      <div class="gg-label r">右 ▶</div>
+      <div id="trail"></div>
+      <div id="dot"></div>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="k">前後G</div><div class="v mono" id="lonG" style="color:var(--accel)">0.00</div><div class="u">+加速 / −制動</div></div>
+    <div class="card"><div class="k">横G</div><div class="v mono" id="latG" style="color:var(--lat)">0.00</div><div class="u">+右 / −左</div></div>
+    <div class="card"><div class="k">合成G</div><div class="v mono" id="totG">0.00</div><div class="u">水平方向</div></div>
+    <div class="card"><div class="k">回転</div><div class="v mono" id="yaw">0</div><div class="u">°/秒</div></div>
+  </div>
+
+  <div class="peaks">
+    <div class="peak"><div class="k">最高速度</div><div class="v mono" id="pSpeed" style="color:var(--speed)">0</div></div>
+    <div class="peak"><div class="k">最大加速</div><div class="v mono" id="pAcc" style="color:var(--accel)">0.00</div></div>
+    <div class="peak"><div class="k">最大制動</div><div class="v mono" id="pBrk" style="color:var(--brake)">0.00</div></div>
+    <div class="peak"><div class="k">最大横G</div><div class="v mono" id="pLat" style="color:var(--lat)">0.00</div></div>
+  </div>
+
+  <div class="btns">
+    <button class="btn zero" id="btnZero">ゼロ設定</button>
+    <button class="btn fwd" id="btnFwd">前方向セット</button>
+    <button class="btn reset" id="btnReset">ピークリセット</button>
+  </div>
+
+  <div id="status">初期化中…</div>
+</div>
+
+<script>
+"use strict";
+const G = 9.80665;
+const $ = id => document.getElementById(id);
+
+// ---- 状態 ----
+let gravity = null;          // 重力ベクトル推定（ローパス）
+const GRAV_A = 0.92;         // 重力ローパス係数（大きいほどゆっくり）
+let forwardRef = null;       // キャリブレーションした前方向（水平・単位ベクトル）
+let dispLon=0, dispLat=0, dispTot=0, dispYaw=0; // 表示用の平滑化値
+const DISP_A = 0.80;         // 表示の平滑化
+let speedKmh = 0;
+let peak = {spd:0, acc:0, brk:0, lat:0};
+let captureFwd = false;      // 前方向セット待ちフラグ
+let lastHoriz = null;        // 直近の水平加速度ベクトル
+
+// ---- ベクトル小道具 ----
+const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
+const dot=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
+const mag=a=>Math.hypot(a.x,a.y,a.z);
+const cross=(a,b)=>({x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x});
+const norm=a=>{const m=mag(a)||1;return {x:a.x/m,y:a.y/m,z:a.z/m};};
+
+// ================= センサー開始 =================
+function start(){
+  $("intro").style.display="none";
+  $("hud").style.display="flex";
+  setStatus("");
+  requestMotion();
+  startGPS();
+}
+
+function requestMotion(){
+  // iOS 13+ は許可が必要
+  if(typeof DeviceMotionEvent!=="undefined" && typeof DeviceMotionEvent.requestPermission==="function"){
+    DeviceMotionEvent.requestPermission().then(res=>{
+      if(res==="granted"){ addMotion(); }
+      else { setStatus("モーション許可が拒否されました", "ng"); }
+    }).catch(()=> setStatus("モーション許可エラー（HTTPSで開いていますか？）","ng"));
+  } else if(typeof DeviceMotionEvent!=="undefined"){
+    addMotion();
+  } else {
+    setStatus("この端末/ブラウザはモーション非対応","ng");
+  }
+}
+
+let motionOk=false;
+function addMotion(){
+  window.addEventListener("devicemotion", onMotion, true);
+  setTimeout(()=>{ if(!motionOk) setStatus("センサー値が来ません。実機＋HTTPSで開いてください","wait"); }, 1500);
+}
+
+// ---- モーション処理（30〜60Hzで来る） ----
+function onMotion(e){
+  const a = e.accelerationIncludingGravity;
+  if(!a || a.x===null){ return; }
+  motionOk=true;
+  const acc = {x:a.x, y:a.y, z:a.z};
+
+  // 1) 重力をローパスで推定
+  if(!gravity) gravity = {...acc};
+  gravity.x = GRAV_A*gravity.x + (1-GRAV_A)*acc.x;
+  gravity.y = GRAV_A*gravity.y + (1-GRAV_A)*acc.y;
+  gravity.z = GRAV_A*gravity.z + (1-GRAV_A)*acc.z;
+
+  // 2) 重力を引いて「動きの加速度」を取り出す
+  const lin = sub(acc, gravity);
+
+  // 3) 重力方向（真下）を基準に、水平成分だけ取り出す（傾き自動補正）
+  const gdir = norm(gravity);
+  const vert = dot(lin, gdir);
+  const horiz = sub(lin, {x:gdir.x*vert, y:gdir.y*vert, z:gdir.z*vert});
+  lastHoriz = horiz;
+
+  // 4) 前方向セット待ちなら、いまの水平加速度を「前」として記録
+  if(captureFwd && mag(horiz) > 0.6){
+    forwardRef = norm(horiz);
+    captureFwd = false;
+    flashStatus("前方向を記録しました ✔", "ok");
+  }
+
+  // 5) 前後/横に分解
+  let fwd = forwardRef;
+  if(!fwd){
+    // 未キャリブ時の仮の前方向：端末の上方向(+Y)を水平面に投影
+    const yax={x:0,y:1,z:0};
+    const d=dot(yax,gdir);
+    const p=sub(yax,{x:gdir.x*d,y:gdir.y*d,z:gdir.z*d});
+    fwd = mag(p)>0.1 ? norm(p) : {x:1,y:0,z:0};
+  }
+  const right = norm(cross(fwd, gdir)); // 右方向
+
+  const lonG = dot(horiz, fwd) / G;     // 前後（+加速 / −制動）
+  const latG = dot(horiz, right) / G;   // 横（+右 / −左）
+  const totG = mag(horiz) / G;          // 合成（水平）
+
+  // 6) ヨーレート（垂直軸まわりの回転＝カーブ）
+  let yaw=0;
+  if(e.rotationRate){
+    const r={x:e.rotationRate.beta||0, y:e.rotationRate.gamma||0, z:e.rotationRate.alpha||0};
+    yaw = dot(r, gdir); // °/秒（重力軸成分）
+  }
+
+  // 7) 表示の平滑化
+  dispLon = DISP_A*dispLon + (1-DISP_A)*lonG;
+  dispLat = DISP_A*dispLat + (1-DISP_A)*latG;
+  dispTot = DISP_A*dispTot + (1-DISP_A)*totG;
+  dispYaw = DISP_A*dispYaw + (1-DISP_A)*yaw;
+
+  // ピーク更新
+  if(dispLon>peak.acc) peak.acc=dispLon;
+  if(dispLon<-peak.brk) peak.brk=-dispLon;
+  if(Math.abs(dispLat)>peak.lat) peak.lat=Math.abs(dispLat);
+}
+
+// ---- ゼロ設定：いまの重力を即セット（停車中に押す）----
+function setZero(){
+  if(lastHoriz!==null && gravity){
+    // 重力推定をリセット気味に：現在値で初期化し直し
+    gravity = null;
+    flashStatus("ゼロ設定しました（静止状態を基準に）","ok");
+  } else {
+    flashStatus("センサー待機中…","wait");
+  }
+}
+
+// ================= GPS（速度）=================
+function startGPS(){
+  if(!("geolocation" in navigator)){ setStatus("GPS非対応の端末です","ng"); return; }
+  navigator.geolocation.watchPosition(p=>{
+    const s = p.coords.speed; // m/s（取得できないと null）
+    if(s!==null && !isNaN(s)){
+      speedKmh = Math.max(0, s*3.6);
+      if(speedKmh>peak.spd) peak.spd=speedKmh;
+    }
+  }, err=>{
+    setStatus("GPSエラー: "+err.message+"（位置情報を許可してください）","ng");
+  }, {enableHighAccuracy:true, maximumAge:500, timeout:8000});
+}
+
+// ================= 描画ループ =================
+const ggSize = ()=> $(".gg") ? document.querySelector(".gg").clientWidth : 320;
+function render(){
+  $("speed").textContent = speedKmh<1 ? "0" : Math.round(speedKmh);
+  $("lonG").textContent = dispLon.toFixed(2);
+  $("latG").textContent = dispLat.toFixed(2);
+  $("totG").textContent = dispTot.toFixed(2);
+  $("yaw").textContent  = Math.round(dispYaw);
+  $("pSpeed").textContent = Math.round(peak.spd);
+  $("pAcc").textContent = peak.acc.toFixed(2);
+  $("pBrk").textContent = peak.brk.toFixed(2);
+  $("pLat").textContent = peak.lat.toFixed(2);
+
+  // g-g の点：半径=1.2G を円の端に対応
+  const R = ggSize()/2;
+  const scale = R/1.2;
+  let px =  dispLat*scale;   // 右が+x
+  let py = -dispLon*scale;   // 前(加速)が上 → 画面yは下向きなので反転
+  const d = Math.hypot(px,py);
+  if(d>R){ px*=R/d; py*=R/d; } // 円からはみ出さない
+  const dotEl=$("dot");
+  dotEl.style.transform=`translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`;
+  // 加速→緑 / 制動→赤 で色変化
+  if(dispLon < -0.05){
+    dotEl.style.background="radial-gradient(circle at 35% 35%, #fff, var(--brake))";
+    dotEl.style.boxShadow="0 0 18px var(--brake),0 0 6px #fff";
+  } else {
+    dotEl.style.background="radial-gradient(circle at 35% 35%, #fff, var(--accel))";
+    dotEl.style.boxShadow="0 0 18px var(--accel),0 0 6px #fff";
+  }
+  requestAnimationFrame(render);
+}
+
+// ================= UI =================
+function setStatus(msg, cls){
+  const el=$("status");
+  if(!msg){ el.textContent = forwardRef ? "前方向セット済み ✔ 計測中" : "計測中 … 直進加速で「前方向セット」推奨"; el.className=""; return; }
+  el.innerHTML = `<span class="${cls||''}">${msg}</span>`;
+}
+let flashTimer;
+function flashStatus(msg, cls){
+  setStatus(msg, cls);
+  clearTimeout(flashTimer);
+  flashTimer=setTimeout(()=>setStatus(""), 2500);
+}
+
+$("startBtn").addEventListener("click", start);
+$("btnZero").addEventListener("click", setZero);
+$("btnFwd").addEventListener("click", ()=>{
+  captureFwd=true;
+  flashStatus("直進でアクセルを踏んでください…","wait");
+});
+$("btnReset").addEventListener("click", ()=>{
+  peak={spd:0,acc:0,brk:0,lat:0};
+  flashStatus("ピークをリセットしました","ok");
+});
+
+render();
+</script>
+</body>
+</html>
