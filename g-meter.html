@@ -133,7 +133,7 @@
     1. スマホを車にしっかり固定（向きは自由）<br>
     2. <b>スタート</b>を押してセンサーを許可<br>
     3. 停車中に <b>ゼロ設定</b> を押す<br>
-    4. 直線でアクセルを踏みながら <b>前方向セット</b> を押すと前後/横が正確に
+    4. <b>前方向セット</b>を押し、直線で約2秒アクセルを踏むと前後/横が正確に（縦置き・横置きどちらでもOK）
   </div>
   <button id="startBtn">スタート</button>
   <p style="font-size:11px;opacity:.6">※ iPhoneはセンサー許可の確認が出ます。安全のため操作は停車中に。</p>
@@ -201,8 +201,12 @@ let dispLon=0, dispLat=0, dispTot=0, dispYaw=0; // 表示用の平滑化値
 const DISP_A = 0.80;         // 表示の平滑化
 let speedKmh = 0;
 let peak = {spd:0, acc:0, brk:0, lat:0};
-let captureFwd = false;      // 前方向セット待ちフラグ
-let lastHoriz = null;        // 直近の水平加速度ベクトル
+let captureFwd = false;          // 前方向セット待ちフラグ
+let captureSamples = [];         // 記録中の水平加速度サンプル群
+let captureUntil = 0;            // 記録の終了時刻(ms)
+const CAPTURE_MS = 2200;         // 記録する時間（約2秒）
+const CAPTURE_MIN_MAG = 0.8;     // 採用する最小の加速の大きさ(m/s^2)
+let lastHoriz = null;            // 直近の水平加速度ベクトル
 
 // ---- ベクトル小道具 ----
 const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
@@ -262,20 +266,22 @@ function onMotion(e){
   const horiz = sub(lin, {x:gdir.x*vert, y:gdir.y*vert, z:gdir.z*vert});
   lastHoriz = horiz;
 
-  // 4) 前方向セット待ちなら、いまの水平加速度を「前」として記録
-  if(captureFwd && mag(horiz) > 0.6){
-    forwardRef = norm(horiz);
-    captureFwd = false;
-    flashStatus("前方向を記録しました ✔", "ok");
+  // 4) 前方向セット待ち：一定時間ぶんの加速度を集めて平均する
+  //    単発の瞬間値ではなく平均にすることで、端末の縦置き/横置きや手ブレに左右されず、
+  //    「実際に加速した方向」を安定して前方向として記録できる。
+  if(captureFwd){
+    if(mag(horiz) > CAPTURE_MIN_MAG) captureSamples.push({...horiz});
+    if(performance.now() >= captureUntil) finishForwardCapture();
   }
 
   // 5) 前後/横に分解
   let fwd = forwardRef;
   if(!fwd){
-    // 未キャリブ時の仮の前方向：端末の上方向(+Y)を水平面に投影
-    const yax={x:0,y:1,z:0};
-    const d=dot(yax,gdir);
-    const p=sub(yax,{x:gdir.x*d,y:gdir.y*d,z:gdir.z*d});
+    // 未キャリブ時の仮の前方向：画面の「上」方向を端末の向き(縦/横)に合わせて選び、水平面へ投影する。
+    // あくまで仮で、「前方向セット」をすれば実際の加速方向で正確に上書きされる。
+    const up = screenUpAxis();
+    const d = dot(up, gdir);
+    const p = sub(up, {x:gdir.x*d, y:gdir.y*d, z:gdir.z*d});
     fwd = mag(p)>0.1 ? norm(p) : {x:1,y:0,z:0};
   }
   const right = norm(cross(fwd, gdir)); // 右方向
@@ -301,6 +307,33 @@ function onMotion(e){
   if(lonG>peak.acc) peak.acc=lonG;
   if(lonG<-peak.brk) peak.brk=-lonG;
   if(Math.abs(latG)>peak.lat) peak.lat=Math.abs(latG);
+}
+
+// ---- 前方向セットの記録を確定する ----
+function finishForwardCapture(){
+  captureFwd = false;
+  if(captureSamples.length >= 5){
+    // 集めたサンプルの合計（＝平均方向）を「前」とする。端末の向きに依存しない。
+    const s = captureSamples.reduce((a,v)=>({x:a.x+v.x, y:a.y+v.y, z:a.z+v.z}), {x:0,y:0,z:0});
+    forwardRef = norm(s);
+    flashStatus("前方向を記録しました ✔（縦/横どちらでもOK）","ok");
+  } else {
+    flashStatus("加速が弱く記録できません。直進でしっかり加速してもう一度","ng");
+  }
+  captureSamples = [];
+}
+
+// ---- 画面の「上」方向を端末座標で返す（縦/横の向きに対応）----
+function screenUpAxis(){
+  let ang = 0;
+  if(screen.orientation && typeof screen.orientation.angle === "number") ang = screen.orientation.angle;
+  else if(typeof window.orientation === "number") ang = window.orientation;
+  switch(((ang % 360) + 360) % 360){
+    case 90:  return {x:-1, y:0, z:0};  // 横置き
+    case 180: return {x:0, y:-1, z:0};  // 上下逆さ
+    case 270: return {x:1, y:0, z:0};   // 横置き（逆）
+    default:  return {x:0, y:1, z:0};   // 縦置き(0°)
+  }
 }
 
 // ---- ゼロ設定：いまの重力を即セット（停車中に押す）----
@@ -378,8 +411,11 @@ function flashStatus(msg, cls){
 $("startBtn").addEventListener("click", start);
 $("btnZero").addEventListener("click", setZero);
 $("btnFwd").addEventListener("click", ()=>{
-  captureFwd=true;
-  flashStatus("直進でアクセルを踏んでください…","wait");
+  if(captureFwd) return;            // 記録中の二重押しは無視
+  captureFwd = true;
+  captureSamples = [];
+  captureUntil = performance.now() + CAPTURE_MS;
+  flashStatus("直進でアクセルを踏み続けてください…（約2秒記録）","wait");
 });
 $("btnReset").addEventListener("click", ()=>{
   peak={spd:0,acc:0,brk:0,lat:0};
