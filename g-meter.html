@@ -72,8 +72,9 @@
     background:radial-gradient(circle at 50% 50%, #0f1722 0%, #0a0e14 70%);
     border-radius:50%;border:1px solid var(--line);}
   .ring{position:absolute;border-radius:50%;border:1px dashed #233140;inset:50%;transform:translate(-50%,-50%);}
-  .ring.r10{width:100%;height:100%;border-style:solid;border-color:#2a3a4a;}
-  .ring.r05{width:50%;height:50%;}
+  /* 円の端=1.2G のスケールに合わせ、実寸どおりに 1.0G / 0.5G リングを配置 */
+  .ring.r10{width:83.3%;height:83.3%;border-style:solid;border-color:#2a3a4a;}
+  .ring.r05{width:41.7%;height:41.7%;}
   .axis{position:absolute;background:#1b2632;}
   .axis.v{left:50%;top:6%;bottom:6%;width:1px;transform:translateX(-.5px);}
   .axis.h{top:50%;left:6%;right:6%;height:1px;transform:translateY(-.5px);}
@@ -153,8 +154,8 @@
       <div class="ring r05"></div>
       <div class="axis v"></div>
       <div class="axis h"></div>
-      <span class="gg-tick" style="top:25%">1.0G</span>
-      <span class="gg-tick" style="top:38%">0.5G</span>
+      <span class="gg-tick" style="top:9.5%">1.0G</span>
+      <span class="gg-tick" style="top:30%">0.5G</span>
       <div class="gg-label t">加速 ▲</div>
       <div class="gg-label b">▼ ブレーキ</div>
       <div class="gg-label l">◀ 左</div>
@@ -296,10 +297,10 @@ function onMotion(e){
   dispTot = DISP_A*dispTot + (1-DISP_A)*totG;
   dispYaw = DISP_A*dispYaw + (1-DISP_A)*yaw;
 
-  // ピーク更新
-  if(dispLon>peak.acc) peak.acc=dispLon;
-  if(dispLon<-peak.brk) peak.brk=-dispLon;
-  if(Math.abs(dispLat)>peak.lat) peak.lat=Math.abs(dispLat);
+  // ピーク更新：瞬間の最大を取りこぼさないよう、平滑化前の生の値で判定する
+  if(lonG>peak.acc) peak.acc=lonG;
+  if(lonG<-peak.brk) peak.brk=-lonG;
+  if(Math.abs(latG)>peak.lat) peak.lat=Math.abs(latG);
 }
 
 // ---- ゼロ設定：いまの重力を即セット（停車中に押す）----
@@ -328,7 +329,8 @@ function startGPS(){
 }
 
 // ================= 描画ループ =================
-const ggSize = ()=> $(".gg") ? document.querySelector(".gg").clientWidth : 320;
+const ggEl = document.querySelector(".gg");
+const ggSize = ()=> ggEl.clientWidth || 320;
 function render(){
   $("speed").textContent = speedKmh<1 ? "0" : Math.round(speedKmh);
   $("lonG").textContent = dispLon.toFixed(2);
