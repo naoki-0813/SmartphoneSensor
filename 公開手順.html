@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>G-METER を公開してスマホで使う手順</title>
+<style>
+  :root{
+    --bg:#06080c; --panel:#0d1219; --line:#1c2733;
+    --dim:#5c6b7a; --txt:#e8eef5; --accel:#7dff3b;
+    --lat:#23d6ff; --speed:#ffd23b; --brake:#ff3b56;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    background:radial-gradient(120% 70% at 50% -10%, #10202c 0%, var(--bg) 55%), var(--bg);
+    color:var(--txt);
+    font-family:"Hiragino Sans","Yu Gothic","Segoe UI",sans-serif;
+    line-height:1.85; padding:28px 18px 80px;
+  }
+  .wrap{max-width:760px;margin:0 auto;}
+  h1{font-size:clamp(24px,6vw,34px);font-weight:800;letter-spacing:1px;margin-bottom:6px;}
+  h1 span{color:var(--accel);}
+  .lead{color:#9fb0c0;font-size:14px;margin-bottom:8px;}
+  .url-box{
+    background:#0a1119;border:1px solid #234a52;border-radius:12px;
+    padding:14px 16px;margin:18px 0;word-break:break-all;
+  }
+  .url-box .k{font-size:11px;color:var(--dim);letter-spacing:1px;display:block;margin-bottom:4px;}
+  .url-box a{color:var(--lat);font-weight:700;font-size:16px;text-decoration:none;font-family:monospace;}
+
+  .step{
+    background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:18px 20px;margin:16px 0;position:relative;
+  }
+  .step h2{
+    font-size:17px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:10px;
+  }
+  .num{
+    flex:0 0 auto;width:30px;height:30px;border-radius:50%;
+    background:var(--accel);color:#06080c;font-weight:800;font-size:15px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .step ol,.step ul{margin:6px 0 0 8px;padding-left:20px;}
+  .step li{margin-bottom:7px;font-size:14.5px;}
+  .step p{font-size:14.5px;margin-top:6px;}
+  code,kbd{
+    font-family:"Consolas",monospace;background:#0a1119;border:1px solid #1c2733;
+    border-radius:6px;padding:2px 7px;font-size:13px;color:var(--speed);
+  }
+  kbd{color:var(--lat);}
+  .path{color:var(--accel);font-weight:700;}
+  .note{
+    background:#0a0e14;border-left:3px solid var(--speed);
+    border-radius:0 8px 8px 0;padding:10px 14px;margin:12px 0;
+    font-size:13px;color:#c0ccd8;
+  }
+  .note.warn{border-left-color:var(--brake);}
+  .note.ok{border-left-color:var(--accel);}
+  .note b{color:var(--txt);}
+  .qr{text-align:center;margin-top:12px;}
+  .qr img{background:#fff;padding:10px;border-radius:12px;width:180px;height:180px;}
+  .qr small{display:block;color:var(--dim);margin-top:8px;font-size:12px;}
+  .why{font-size:13px;color:#8aa;margin-top:8px;}
+  footer{text-align:center;color:var(--dim);font-size:12px;margin-top:30px;}
+  a.inline{color:var(--lat);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>G-<span>METER</span> を公開してスマホで使う手順</h1>
+  <p class="lead">GitHub Pages（ギットハブ ページズ＝GitHubが無料で用意してくれる公開サーバ）を使って、
+  HTTPSのURLで世界に公開し、スマホのブラウザから接続します。</p>
+
+  <div class="note">
+    <b>なぜHTTPSが必要？</b><br>
+    このアプリはスマホの<b>モーションセンサー</b>と<b>GPS</b>を使います。これらは安全のため、
+    <b>HTTPS（鍵マークのつく安全な通信）でしか動きません</b>。
+    GitHub Pages は自動でHTTPSにしてくれるので、ぴったりです。
+  </div>
+
+  <div class="url-box">
+    <span class="k">公開後にスマホで開くURL（予定）</span>
+    <a href="https://naoki-0813.github.io/SmartphoneSensor/g-meter.html">https://naoki-0813.github.io/SmartphoneSensor/g-meter.html</a>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="step">
+    <h2><span class="num">1</span>変更をGitHubに反映（push）する</h2>
+    <p>すでにコミット済みなら、最新の状態がGitHub上にあるか確認します。Claude に
+    「<b>pushして</b>」と頼むか、自分でやる場合は次のコマンドです。</p>
+    <ol>
+      <li><code>git push origin main</code> を実行する</li>
+      <li>ブラウザで <a class="inline" href="https://github.com/naoki-0813/SmartphoneSensor">github.com/naoki-0813/SmartphoneSensor</a>
+        を開き、<code>g-meter.html</code> が表示されることを確認</li>
+    </ol>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="step">
+    <h2><span class="num">2</span>GitHub Pages を有効にする</h2>
+    <ol>
+      <li>リポジトリのページ上部の <kbd>Settings</kbd>（設定）をクリック</li>
+      <li>左メニューの <kbd>Pages</kbd> をクリック</li>
+      <li><b>Build and deployment</b> の <b>Source</b> を
+        <span class="path">Deploy from a branch</span> に設定</li>
+      <li><b>Branch</b> で <span class="path">main</span> ／ フォルダは <span class="path">/ (root)</span>
+        を選び、<kbd>Save</kbd> を押す</li>
+    </ol>
+    <div class="note">
+      数分すると、ページ上部に
+      <b>「Your site is live at https://naoki-0813.github.io/SmartphoneSensor/」</b>
+      と表示されます。これが公開された合図です。
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="step">
+    <h2><span class="num">3</span>公開URLをスマホで開く</h2>
+    <p>パソコンのブラウザでまず動作確認してから、スマホで開きます。
+    アプリ本体は <code>g-meter.html</code> なので、URLの末尾を忘れずに付けます。</p>
+    <div class="url-box">
+      <span class="k">スマホで開くURL</span>
+      <a href="https://naoki-0813.github.io/SmartphoneSensor/g-meter.html">https://naoki-0813.github.io/SmartphoneSensor/g-meter.html</a>
+    </div>
+    <div class="qr">
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://naoki-0813.github.io/SmartphoneSensor/g-meter.html" alt="QRコード">
+      <small>スマホのカメラでこのQRコードを読み取ると、上のURLが開きます<br>（QR画像はネット接続時のみ表示されます）</small>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="step">
+    <h2><span class="num">4</span>センサーの利用を許可する</h2>
+    <ul>
+      <li>アプリの <b>「スタート」</b> ボタンを押す</li>
+      <li><b>iPhone</b>: 「モーションと方向へのアクセスを許可しますか？」が出たら <b>許可</b></li>
+      <li><b>位置情報（GPS）</b>: 許可を求められたら <b>許可</b>（速度表示に必要）</li>
+      <li>停車中に <b>「ゼロ設定」</b>、直進加速中に <b>「前方向セット」</b> を押すと精度が上がります</li>
+    </ul>
+    <div class="note warn">
+      <b>安全のため、操作は必ず停車中に。</b>運転中は画面を見ないでください。
+      スマホは車にしっかり固定してから使いましょう。
+    </div>
+  </div>
+
+  <!-- トラブル -->
+  <div class="step">
+    <h2><span class="num">？</span>うまくいかないとき</h2>
+    <ul>
+      <li><b>404 と出る</b>：URLの末尾 <code>/g-meter.html</code> が抜けていないか確認。
+        公開直後は反映に数分かかることがあります。</li>
+      <li><b>センサー値が来ない</b>：必ず <b>https://</b> で開いていますか？ パソコンや
+        <code>file://</code>（ファイルを直接開く）ではセンサーは動きません。</li>
+      <li><b>速度が「0」のまま</b>：GPSの許可と、屋外（空が見える場所）かを確認。
+        屋内や駐車場では電波が届きにくいです。</li>
+      <li><b>iPhoneで許可が出ない</b>：Safari の設定で「モーションと画面の向きのアクセス」がオンか確認。</li>
+    </ul>
+    <div class="note ok">
+      公開URLは一度設定すれば、コードを更新して <code>git push</code> するたびに自動で反映されます。
+    </div>
+  </div>
+
+  <footer>G-METER 公開手順 / GitHub Pages + HTTPS</footer>
+
+</div>
+</body>
+</html>

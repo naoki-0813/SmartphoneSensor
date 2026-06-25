@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>FUSION METER - 速度・加速度フュージョン</title>
+<style>
+  /* ===== デザイントークン ===== */
+  :root {
+    --bg: #0A0E1A;          /* 夜のダッシュボード */
+    --panel: #121829;
+    --line: #243049;
+    --text: #E8EDF7;
+    --dim: #7B89A8;
+    --accel: #FFB454;        /* アクセル=アンバー */
+    --brake: #FF5D73;        /* ブレーキ=レッド */
+    --gps: #57D4FF;          /* GPS関連=シアン */
+    --ok: #58E0A0;
+    --digit-font: "DIN Alternate", ui-monospace, "SF Mono", "Roboto Mono", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    display: flex; flex-direction: column;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    user-select: none;
+  }
+
+  /* ===== ヘッダー ===== */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .logo { font-size: 13px; letter-spacing: 3px; font-weight: 700; color: var(--dim); }
+  .logo b { color: var(--text); }
+  .sensors { display: flex; gap: 12px; font-size: 10px; color: var(--dim); }
+  .sensor { display: flex; align-items: center; gap: 4px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #3A4763; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .dot.warn { background: var(--accel); box-shadow: 0 0 6px var(--accel); }
+
+  /* ===== メイン ===== */
+  main { flex: 1; display: flex; flex-direction: column; padding: 8px 16px 16px; gap: 14px; }
+
+  /* 速度表示(コンパクト) */
+  .speed-block { text-align: center; padding: 4px 0 0; }
+  .speed-value {
+    font-family: var(--digit-font);
+    font-size: clamp(48px, 16vw, 78px);
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -2px;
+    transition: color 0.3s;
+  }
+  .speed-value small { font-size: 16px; color: var(--dim); letter-spacing: 2px; font-weight: 600; }
+  .speed-sub {
+    margin-top: 2px; font-size: 11px; color: var(--dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .speed-sub b { color: var(--gps); font-weight: 600; }
+
+  /* ===== 3D 車体姿勢ビュー(シグネチャ要素) ===== */
+  .car-stage {
+    position: relative;
+    flex: 1;
+    min-height: 230px;
+    display: flex; align-items: center; justify-content: center;
+    perspective: 720px;
+    perspective-origin: 50% 38%;
+  }
+  /* 路面のグリッド(奥行きの基準) */
+  .car-stage::before {
+    content: ""; position: absolute; left: 50%; top: 52%;
+    width: 280px; height: 280px;
+    transform: translate(-50%,-50%) rotateX(64deg);
+    background:
+      linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 100% 28px,
+      linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 28px 100%;
+    opacity: 0.25;
+    -webkit-mask-image: radial-gradient(circle at center, #000 30%, transparent 72%);
+            mask-image: radial-gradient(circle at center, #000 30%, transparent 72%);
+    pointer-events: none;
+  }
+  .car {
+    width: 150px;
+    transform-style: preserve-3d;
+    transition: transform 0.12s ease-out, filter 0.2s ease-out;
+    will-change: transform, filter;
+  }
+  .car svg { display: block; width: 100%; height: auto; overflow: visible; }
+  /* 荷重ゾーンは色をJSで変えるので transition を付ける */
+  .car .zone { transition: fill 0.15s, opacity 0.15s; }
+  /* Gの数値オーバーレイ(車の前後ラベル) */
+  .stage-tag {
+    position: absolute; font-size: 9px; letter-spacing: 2px; color: var(--dim);
+    pointer-events: none;
+  }
+  .stage-tag.front { top: 6%; }
+  .stage-tag.rear  { bottom: 6%; }
+
+  /* 状態チップ */
+  .state-chip {
+    align-self: center;
+    padding: 6px 22px; border-radius: 999px;
+    font-size: 15px; font-weight: 700; letter-spacing: 4px;
+    border: 1px solid var(--line);
+    color: var(--dim); background: var(--panel);
+    transition: all 0.25s;
+  }
+  .state-chip.accel { color: #1A1205; background: var(--accel); border-color: var(--accel); }
+  .state-chip.brake { color: #2A0810; background: var(--brake); border-color: var(--brake); }
+  .state-chip.cruise { color: var(--ok); border-color: var(--ok); }
+
+  /* ===== 前後Gバー(シグネチャ要素) ===== */
+  .gbar-panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px 14px 10px;
+  }
+  .gbar-head {
+    display: flex; justify-content: space-between; font-size: 10px;
+    color: var(--dim); letter-spacing: 1px; margin-bottom: 8px;
+  }
+  .gbar-head .gval { font-family: var(--digit-font); font-size: 16px; color: var(--text); font-variant-numeric: tabular-nums; }
+  .gbar {
+    position: relative; height: 38px; border-radius: 8px;
+    background: #0D1322;
+    overflow: hidden;
+  }
+  /* 中央線と目盛り */
+  .gbar .center { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: var(--line); }
+  .gbar .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: #1B2440; }
+  .gbar .fill {
+    position: absolute; top: 4px; bottom: 4px; left: 50%;
+    width: 0; border-radius: 4px;
+    background: var(--accel);
+    transition: width 0.08s linear;
+  }
+  .gbar .fill.neg { background: var(--brake); }
+  .gbar .peak {
+    position: absolute; top: 2px; bottom: 2px; width: 2px;
+    background: rgba(255,255,255,0.55);
+    transition: left 0.2s;
+  }
+  .gbar-labels {
+    display: flex; justify-content: space-between;
+    font-size: 9px; color: var(--dim); margin-top: 5px; padding: 0 2px;
+  }
+
+  /* 左右Gと補足データ */
+  .data-row { display: flex; gap: 10px; }
+  .data-cell {
+    flex: 1; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 12px;
+  }
+  .data-cell .label { font-size: 9px; color: var(--dim); letter-spacing: 1px; }
+  .data-cell .value {
+    font-family: var(--digit-font); font-size: 20px; margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+  .data-cell .value small { font-size: 11px; color: var(--dim); }
+
+  /* ステータス行 */
+  .status-line {
+    font-size: 11px; color: var(--dim); text-align: center; min-height: 16px;
+    line-height: 1.5;
+  }
+
+  /* ===== ボタン ===== */
+  .controls { display: flex; gap: 10px; margin-top: auto; }
+  button {
+    flex: 1; padding: 15px 0; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text);
+    font-size: 14px; font-weight: 700; font-family: inherit;
+    cursor: pointer;
+  }
+  button:active { transform: scale(0.97); }
+  button.primary { background: var(--gps); border-color: var(--gps); color: #06131C; }
+  button.primary.running { background: var(--brake); border-color: var(--brake); color: #fff; }
+  button.ghost { flex: 0.6; color: var(--dim); }
+  button:disabled { opacity: 0.4; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .gbar .fill, .gbar .peak, .state-chip { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">FUSION<b>METER</b></div>
+  <div class="sensors">
+    <div class="sensor"><span class="dot" id="dotMotion"></span>MOTION</div>
+    <div class="sensor"><span class="dot" id="dotGps"></span>GPS</div>
+    <div class="sensor"><span class="dot" id="dotCal"></span>CAL</div>
+  </div>
+</header>
+
+<main>
+  <!-- 融合速度(コンパクト) -->
+  <div class="speed-block">
+    <div class="speed-value" id="speedValue">0<small> km/h</small></div>
+    <div class="speed-sub">GPS生値 <b id="gpsRaw">--</b> km/h ・ 精度 <span id="gpsAcc">--</span> m</div>
+  </div>
+
+  <!-- 3D 車体姿勢ビュー -->
+  <div class="car-stage">
+    <span class="stage-tag front">FRONT</span>
+    <span class="stage-tag rear">REAR</span>
+    <div class="car" id="car">
+      <svg viewBox="0 0 160 300" xmlns="http://www.w3.org/2000/svg">
+        <!-- 接地影 -->
+        <ellipse cx="80" cy="270" rx="60" ry="14" fill="#000" opacity="0.35"/>
+        <!-- タイヤ -->
+        <rect x="14" y="60"  width="20" height="46" rx="9" fill="#0B0F1A"/>
+        <rect x="126" y="60" width="20" height="46" rx="9" fill="#0B0F1A"/>
+        <rect x="14" y="196" width="20" height="46" rx="9" fill="#0B0F1A"/>
+        <rect x="126" y="196" width="20" height="46" rx="9" fill="#0B0F1A"/>
+        <!-- 車体ベース -->
+        <rect x="28" y="20" width="104" height="262" rx="42" fill="#1B2238" stroke="#33415F" stroke-width="2"/>
+        <!-- キャビン/ルーフ -->
+        <rect x="44" y="92" width="72" height="118" rx="26" fill="#0F1525"/>
+        <!-- フロントガラス -->
+        <path d="M50 96 Q80 78 110 96 L104 120 Q80 110 56 120 Z" fill="#22304C" opacity="0.9"/>
+        <!-- リアガラス -->
+        <path d="M56 198 Q80 208 104 198 L110 178 Q80 192 50 178 Z" fill="#22304C" opacity="0.7"/>
+
+        <!-- ===== 荷重ゾーン(JSで赤く光る) ===== -->
+        <!-- 前(ブレーキで荷重) -->
+        <path id="zoneFront" class="zone" d="M28 62 Q28 20 80 20 Q132 20 132 62 L132 70 L28 70 Z"
+              fill="#FF3B30" opacity="0"/>
+        <!-- 後(加速で荷重) -->
+        <path id="zoneRear" class="zone" d="M28 240 L132 240 L132 248 Q132 282 80 282 Q28 282 28 248 Z"
+              fill="#FF3B30" opacity="0"/>
+        <!-- 左(右コーナーで荷重) -->
+        <path id="zoneLeft" class="zone" d="M28 70 L44 70 L44 240 L28 240 Z" fill="#FF3B30" opacity="0"/>
+        <!-- 右(左コーナーで荷重) -->
+        <path id="zoneRight" class="zone" d="M116 70 L132 70 L132 240 L116 240 Z" fill="#FF3B30" opacity="0"/>
+
+        <!-- ヘッドライト/テールランプ -->
+        <rect x="40" y="26" width="20" height="7" rx="3" fill="#FFF6D8" opacity="0.85"/>
+        <rect x="100" y="26" width="20" height="7" rx="3" fill="#FFF6D8" opacity="0.85"/>
+        <rect x="40" y="270" width="20" height="6" rx="3" fill="#FF5D73" opacity="0.7"/>
+        <rect x="100" y="270" width="20" height="6" rx="3" fill="#FF5D73" opacity="0.7"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- 走行状態 -->
+  <div class="state-chip" id="stateChip">停 車</div>
+
+  <!-- 前後Gバー -->
+  <div class="gbar-panel">
+    <div class="gbar-head">
+      <span>◀ BRAKE</span>
+      <span class="gval" id="gValue">+0.00 G</span>
+      <span>ACCEL ▶</span>
+    </div>
+    <div class="gbar" id="gbar">
+      <div class="tick" style="left:10%"></div>
+      <div class="tick" style="left:30%"></div>
+      <div class="tick" style="left:70%"></div>
+      <div class="tick" style="left:90%"></div>
+      <div class="center"></div>
+      <div class="fill" id="gFill"></div>
+      <div class="peak" id="peakNeg" style="left:50%"></div>
+      <div class="peak" id="peakPos" style="left:50%"></div>
+    </div>
+    <div class="gbar-labels">
+      <span>-0.5</span><span>-0.25</span><span>0</span><span>+0.25</span><span>+0.5</span>
+    </div>
+  </div>
+
+  <!-- 補足データ -->
+  <div class="data-row">
+    <div class="data-cell">
+      <div class="label">左右G</div>
+      <div class="value" id="latG">0.00 <small>G</small></div>
+    </div>
+    <div class="data-cell">
+      <div class="label">センサー更新</div>
+      <div class="value" id="hz">-- <small>Hz</small></div>
+    </div>
+    <div class="data-cell">
+      <div class="label">前後軸の学習</div>
+      <div class="value" id="axisConf">0 <small>%</small></div>
+    </div>
+  </div>
+
+  <div class="status-line" id="statusLine">「計測開始」を押すとセンサー許可を求めます</div>
+
+  <!-- 操作 -->
+  <div class="controls">
+    <button class="ghost" id="btnDemo">デモ</button>
+    <button id="btnCal" disabled>静止ｷｬﾘﾌﾞﾚｰｼｮﾝ</button>
+    <button class="primary" id="btnStart">計測開始</button>
+  </div>
+</main>
+
+<script>
+/* =========================================================
+   FUSION METER
+   ロジック全体像:
+   1. DeviceMotion(約60Hz)から加速度を取得
+   2. 静止キャリブレーションで重力ベクトルを記録
+   3. 重力を除去 → 水平面に投影 → 「水平加速度」を得る
+   4. GPS速度の増減と水平加速度の向きを照合して
+      「車の前方向ベクトル」をオンライン学習
+   5. 相補フィルタで速度を融合:
+      短期 = 加速度の積分 / 長期 = GPS速度で補正
+   ========================================================= */
+
+// ---------- 定数(チューニングポイント) ----------
+const GRAVITY        = 9.80665;  // 1G [m/s^2]
+const LP_ACCEL       = 0.25;     // 加速度ローパス係数(大=反応速い/ノイズ多)
+const GPS_GAIN       = 0.35;     // GPS補正の強さ(1回のfixでどれだけ寄せるか)
+const AXIS_LEARN     = 0.15;     // 前後軸の学習速度
+const AXIS_MIN_ACC   = 0.4;      // 軸学習に使うGPS加速度の最小値 [m/s^2]
+const STATE_G_TH     = 0.05;     // 加減速判定のG閾値
+const STATE_HOLD_MS  = 500;      // 判定の継続時間
+const GPS_TIMEOUT_MS = 5000;     // GPS途絶とみなす時間
+
+// ---------- 状態 ----------
+let running = false, demoMode = false;
+let gravityVec = null;           // 重力ベクトル(キャリブ結果)
+let forwardVec = null;           // 車の前方向(水平面内・単位ベクトル)
+let axisConfidence = 0;          // 前後軸の学習度 0〜1
+let fusedSpeed = 0;              // 融合速度 [m/s]
+let fwdAccel = 0, latAccel = 0;  // 前後・左右加速度 [m/s^2](LPF後)
+let lastMotionT = null;
+let lastGps = { speed: null, time: 0, acc: null, prevSpeed: null, prevTime: 0 };
+let accelBuf = [];               // GPS区間中の水平加速度の平均用
+let peakPos = 0, peakNeg = 0;
+let stateTimer = { state: 'stop', since: 0 };
+let hzCount = 0, hzLast = performance.now();
+let calSamples = null;
+let watchId = null, wakeLock = null;
+
+// ---------- DOM ----------
+const $ = id => document.getElementById(id);
+
+// ---------- ベクトル小道具 ----------
+const dot   = (a,b) => a.x*b.x + a.y*b.y + a.z*b.z;
+const norm  = v => Math.sqrt(dot(v,v));
+const scale = (v,s) => ({x:v.x*s, y:v.y*s, z:v.z*s});
+const sub   = (a,b) => ({x:a.x-b.x, y:a.y-b.y, z:a.z-b.z});
+const add   = (a,b) => ({x:a.x+b.x, y:a.y+b.y, z:a.z+b.z});
+const unit  = v => { const n = norm(v); return n > 1e-6 ? scale(v, 1/n) : {x:0,y:0,z:0}; };
+
+/* =========================================================
+   ① DeviceMotion処理(毎フレーム)
+   ========================================================= */
+function onMotion(e) {
+  const ag = e.accelerationIncludingGravity;
+  if (!ag || ag.x === null) return;
+  const raw = { x: ag.x, y: ag.y, z: ag.z };
+  const now = performance.now();
+
+  // 更新レート計測
+  hzCount++;
+  if (now - hzLast > 1000) {
+    $('hz').innerHTML = hzCount + ' <small>Hz</small>';
+    hzCount = 0; hzLast = now;
+  }
+
+  // キャリブレーション中はサンプル収集のみ
+  if (calSamples) { calSamples.push(raw); return; }
+  if (!gravityVec) return; // キャリブ前は何もしない
+
+  // --- 重力除去 ---
+  // iOSはe.accelerationに重力除去済みの値が来るのでそちらを優先
+  let lin;
+  if (e.acceleration && e.acceleration.x !== null) {
+    lin = { x: e.acceleration.x, y: e.acceleration.y, z: e.acceleration.z };
+  } else {
+    lin = sub(raw, gravityVec);
+  }
+
+  // --- 水平面に投影(重力方向の成分を除去) ---
+  const gHat = unit(gravityVec);
+  const horiz = sub(lin, scale(gHat, dot(lin, gHat)));
+
+  // --- 前後・左右に分解 ---
+  let f = 0, l = 0;
+  if (forwardVec) {
+    f = dot(horiz, forwardVec);
+    // 左右 = 水平 − 前後成分 の大きさ(符号は外積のz相当で決定)
+    const lateralVec = sub(horiz, scale(forwardVec, f));
+    const cross = gHat.x*(forwardVec.y*lateralVec.z - forwardVec.z*lateralVec.y)
+                + gHat.y*(forwardVec.z*lateralVec.x - forwardVec.x*lateralVec.z)
+                + gHat.z*(forwardVec.x*lateralVec.y - forwardVec.y*lateralVec.x);
+    l = norm(lateralVec) * Math.sign(cross || 1);
+  }
+
+  // --- ローパスフィルタ(振動除去) ---
+  fwdAccel = fwdAccel + LP_ACCEL * (f - fwdAccel);
+  latAccel = latAccel + LP_ACCEL * (l - latAccel);
+
+  // 前後軸学習用に水平加速度を貯める
+  accelBuf.push(horiz);
+  if (accelBuf.length > 300) accelBuf.shift();
+
+  // --- ② 速度の積分(短期成分) ---
+  if (lastMotionT !== null) {
+    const dt = Math.min((now - lastMotionT) / 1000, 0.1);
+    if (forwardVec && axisConfidence > 0.3) {
+      fusedSpeed += fwdAccel * dt;
+      if (fusedSpeed < 0) fusedSpeed = 0;
+    }
+  }
+  lastMotionT = now;
+
+  updateDisplay();
+}
+
+/* =========================================================
+   ② GPS処理(約1Hz)— 長期補正と前後軸学習
+   ========================================================= */
+function onGps(pos) {
+  const now = performance.now();
+  const sp = pos.coords.speed;          // m/s(取れない端末はnull)
+  lastGps.acc = pos.coords.accuracy;
+
+  $('dotGps').className = 'dot on';
+  $('gpsAcc').textContent = lastGps.acc ? lastGps.acc.toFixed(0) : '--';
+
+  if (sp === null || lastGps.acc > 30) {
+    // 速度が取れない/精度が悪いfixは補正に使わない
+    lastGps.time = now;
+    return;
+  }
+
+  $('gpsRaw').textContent = (sp * 3.6).toFixed(1);
+
+  // --- 前後軸のオンライン学習 ---
+  if (lastGps.speed !== null) {
+    const dtg = (now - lastGps.prevTime) / 1000;
+    if (dtg > 0.3 && dtg < 4) {
+      const gpsAccel = (sp - lastGps.speed) / dtg;   // GPSから見た前後加速度
+      if (Math.abs(gpsAccel) > AXIS_MIN_ACC && accelBuf.length > 5) {
+        // この区間の水平加速度の平均ベクトル
+        let avg = {x:0,y:0,z:0};
+        accelBuf.forEach(v => avg = add(avg, v));
+        avg = scale(avg, 1 / accelBuf.length);
+        if (norm(avg) > 0.15) {
+          // GPSが「加速」と言っているなら平均ベクトルが前方向
+          const candidate = unit(scale(avg, Math.sign(gpsAccel)));
+          forwardVec = forwardVec
+            ? unit(add(scale(forwardVec, 1 - AXIS_LEARN), scale(candidate, AXIS_LEARN)))
+            : candidate;
+          axisConfidence = Math.min(1, axisConfidence + 0.15);
+          $('axisConf').innerHTML = Math.round(axisConfidence * 100) + ' <small>%</small>';
+        }
+      }
+    }
+  }
+
+  // --- ③ 相補フィルタ: GPSで融合速度を補正 ---
+  fusedSpeed = fusedSpeed + GPS_GAIN * (sp - fusedSpeed);
+
+  accelBuf = [];
+  lastGps.prevSpeed = lastGps.speed;
+  lastGps.prevTime = lastGps.time || now;
+  lastGps.speed = sp;
+  lastGps.time = now;
+}
+
+/* =========================================================
+   ③ 走行状態の判定(G + GPS傾向のAND条件)
+   ========================================================= */
+function judgeState(now) {
+  const g = fwdAccel / GRAVITY;
+  let want;
+  if (fusedSpeed * 3.6 < 2 && Math.abs(g) < STATE_G_TH) want = 'stop';
+  else if (g > STATE_G_TH)  want = 'accel';
+  else if (g < -STATE_G_TH) want = 'brake';
+  else want = 'cruise';
+
+  if (want !== stateTimer.state) {
+    if (now - stateTimer.since > STATE_HOLD_MS) {
+      stateTimer.state = want; stateTimer.since = now;
+      applyStateChip(want);
+    }
+  } else {
+    stateTimer.since = now;
+  }
+}
+
+function applyStateChip(s) {
+  const chip = $('stateChip');
+  const map = {
+    stop:   ['停 車',   ''],
+    accel:  ['加速中',  'accel'],
+    brake:  ['減速中',  'brake'],
+    cruise: ['巡 航',   'cruise'],
+  };
+  chip.textContent = map[s][0];
+  chip.className = 'state-chip ' + map[s][1];
+}
+
+/* =========================================================
+   表示更新
+   ========================================================= */
+/* =========================================================
+   3D 車体姿勢ビューの更新
+   - 前後G  → ピッチ(加速で前が浮く / ブレーキで前が沈む)
+   - 左右G  → ロール(コーナーで外側に傾く)
+   - 荷重のかかった部位を赤く光らせる(重量移動の可視化)
+   ========================================================= */
+const PITCH_FS = 0.45;   // ピッチのフルスケール [G]
+const ROLL_FS  = 0.45;   // ロールのフルスケール [G]
+const PITCH_MAX = 16;    // 最大ピッチ角 [deg]
+const ROLL_MAX  = 14;    // 最大ロール角 [deg]
+const ZONE_FS   = 0.40;  // 赤くなりきるG [G]
+
+const clamp1 = v => Math.max(-1, Math.min(1, v));
+
+function updateCar(g, gLat) {
+  const car = $('car');
+  if (!car) return;
+
+  // --- 傾き ---
+  // 加速(g>0)で前(上)が浮く → rotateX を正に
+  const pitch = clamp1(g / PITCH_FS) * PITCH_MAX;
+  // 右向きの横G(gLat>0)で車体は左へロール → rotateY を負に
+  const roll  = -clamp1(gLat / ROLL_FS) * ROLL_MAX;
+  car.style.transform = `rotateX(${pitch.toFixed(1)}deg) rotateY(${roll.toFixed(1)}deg)`;
+
+  // --- 荷重ゾーンの赤み(0〜1) ---
+  const frontLoad = Math.max(0, -g)    / ZONE_FS;   // ブレーキ → 前荷重
+  const rearLoad  = Math.max(0,  g)    / ZONE_FS;   // 加速     → 後荷重
+  const leftLoad  = Math.max(0, gLat)  / ZONE_FS;   // 右コーナー → 左荷重
+  const rightLoad = Math.max(0, -gLat) / ZONE_FS;   // 左コーナー → 右荷重
+  setZone('zoneFront', frontLoad);
+  setZone('zoneRear',  rearLoad);
+  setZone('zoneLeft',  leftLoad);
+  setZone('zoneRight', rightLoad);
+
+  // --- 総合Gでハローの色を変える(青緑 → 赤) ---
+  const total = Math.min(1, Math.hypot(g, gLat) / 0.6);
+  const halo = lerpColor([87,212,255], [255,59,48], total);
+  const blur = 6 + total * 26;
+  car.style.filter = `drop-shadow(0 6px 10px rgba(0,0,0,0.5)) drop-shadow(0 0 ${blur.toFixed(0)}px rgba(${halo},${0.25 + total*0.5}))`;
+}
+
+function setZone(id, load) {
+  const el = $(id);
+  if (!el) return;
+  const t = Math.min(1, load);
+  // 弱い荷重は控えめに、強い荷重ではっきり赤く
+  el.style.opacity = (t * 0.92).toFixed(2);
+  // 黄→赤のグラデーション(軽い荷重はアンバー寄り、強い荷重は赤)
+  const col = lerpColor([255,180,84], [255,45,40], t);
+  el.setAttribute('fill', `rgb(${col})`);
+}
+
+// 2色のRGB線形補間 → "r,g,b" 文字列
+function lerpColor(a, b, t) {
+  t = Math.max(0, Math.min(1, t));
+  return a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(',');
+}
+
+function updateDisplay() {
+  const now = performance.now();
+  const kmh = fusedSpeed * 3.6;
+  $('speedValue').innerHTML = Math.round(kmh) + '<small> km/h</small>';
+
+  const g = fwdAccel / GRAVITY;
+  const gLat = latAccel / GRAVITY;
+  $('gValue').textContent = (g >= 0 ? '+' : '') + g.toFixed(2) + ' G';
+  $('latG').innerHTML = Math.abs(gLat).toFixed(2) + ' <small>G</small>';
+
+  // ===== 3D 車体姿勢 =====
+  updateCar(g, gLat);
+
+  // Gバー(±0.5Gでフルスケール)
+  const ratio = Math.max(-1, Math.min(1, g / 0.5));
+  const fill = $('gFill');
+  if (ratio >= 0) {
+    fill.classList.remove('neg');
+    fill.style.left = '50%';
+    fill.style.width = (ratio * 50) + '%';
+  } else {
+    fill.classList.add('neg');
+    fill.style.left = (50 + ratio * 50) + '%';
+    fill.style.width = (-ratio * 50) + '%';
+  }
+  // ピークホールド
+  if (g > peakPos) { peakPos = g; $('peakPos').style.left = (50 + Math.min(1, peakPos/0.5)*50) + '%'; }
+  if (g < peakNeg) { peakNeg = g; $('peakNeg').style.left = (50 + Math.max(-1, peakNeg/0.5)*50) + '%'; }
+
+  // GPS途絶チェック
+  if (running && !demoMode && now - lastGps.time > GPS_TIMEOUT_MS) {
+    $('dotGps').className = 'dot warn';
+    $('statusLine').textContent = 'GPS信号が弱いため速度の精度が低下しています';
+  }
+
+  judgeState(now);
+}
+
+/* =========================================================
+   静止キャリブレーション(3秒間)
+   ========================================================= */
+function calibrate() {
+  calSamples = [];
+  $('btnCal').disabled = true;
+  $('statusLine').textContent = 'キャリブレーション中… スマホを動かさないでください(3秒)';
+  setTimeout(() => {
+    if (calSamples.length < 10) {
+      $('statusLine').textContent = 'センサーデータが不足しています。もう一度お試しください';
+      calSamples = null; $('btnCal').disabled = false;
+      return;
+    }
+    let avg = {x:0,y:0,z:0};
+    calSamples.forEach(v => avg = add(avg, v));
+    gravityVec = scale(avg, 1 / calSamples.length);
+    calSamples = null;
+    $('dotCal').className = 'dot on';
+    $('btnCal').disabled = false;
+    $('statusLine').textContent =
+      'キャリブレーション完了。走行を始めると前後軸を自動学習します(数回の加減速で完了)';
+  }, 3000);
+}
+
+/* =========================================================
+   開始 / 停止
+   ========================================================= */
+async function start() {
+  try {
+    // iOS 13+ はユーザー操作内で許可リクエストが必要
+    if (typeof DeviceMotionEvent !== 'undefined' &&
+        typeof DeviceMotionEvent.requestPermission === 'function') {
+      const r = await DeviceMotionEvent.requestPermission();
+      if (r !== 'granted') { $('statusLine').textContent = 'モーションセンサーが許可されませんでした'; return; }
+    }
+    window.addEventListener('devicemotion', onMotion);
+    $('dotMotion').className = 'dot on';
+
+    watchId = navigator.geolocation.watchPosition(onGps,
+      err => { $('dotGps').className = 'dot warn'; $('statusLine').textContent = 'GPS取得エラー: ' + err.message; },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+
+    // 画面スリープ防止(対応端末のみ)
+    try { wakeLock = await navigator.wakeLock.request('screen'); } catch(e) {}
+
+    running = true;
+    $('btnStart').textContent = '停止';
+    $('btnStart').classList.add('running');
+    $('btnCal').disabled = false;
+    $('statusLine').textContent = '停車中に「静止キャリブレーション」を実行してください';
+  } catch (err) {
+    $('statusLine').textContent = 'センサー開始エラー: ' + err.message;
+  }
+}
+
+function stop() {
+  window.removeEventListener('devicemotion', onMotion);
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  if (wakeLock) { wakeLock.release(); wakeLock = null; }
+  running = false; demoMode = false;
+  $('btnStart').textContent = '計測開始';
+  $('btnStart').classList.remove('running');
+  $('dotMotion').className = 'dot';
+  $('dotGps').className = 'dot';
+  $('statusLine').textContent = '停止しました';
+  if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
+}
+
+$('btnStart').addEventListener('click', () => running ? stop() : start());
+$('btnCal').addEventListener('click', calibrate);
+
+/* =========================================================
+   デモモード(PCや屋内での動作確認用)
+   発進→加速→巡航→減速→停止 を繰り返すシナリオ
+   ========================================================= */
+let demoTimer = null;
+$('btnDemo').addEventListener('click', () => {
+  if (running) stop();
+  demoMode = true; running = true;
+  gravityVec = {x:0, y:0, z:GRAVITY};
+  forwardVec = {x:0, y:1, z:0};
+  axisConfidence = 1;
+  $('axisConf').innerHTML = '100 <small>%</small>';
+  $('dotMotion').className = 'dot on';
+  $('dotGps').className = 'dot on';
+  $('dotCal').className = 'dot on';
+  $('btnStart').textContent = '停止';
+  $('btnStart').classList.add('running');
+  $('statusLine').textContent = 'デモモード: 加速→巡航→減速のシナリオを再生中';
+
+  let t = 0, v = 0;
+  demoTimer = setInterval(() => {
+    t += 0.05;
+    const phase = t % 24;
+    let a;
+    if (phase < 6)       a = 2.2 * (1 - phase/8);          // 加速
+    else if (phase < 14) a = (Math.random()-0.5) * 0.3;     // 巡航
+    else if (phase < 19) a = -2.8;                          // 減速
+    else                 a = 0;                              // 停止
+    v = Math.max(0, v + a * 0.05);
+    const noise = (Math.random()-0.5) * 0.4;
+    fwdAccel = fwdAccel + 0.3 * ((a + noise) - fwdAccel);
+    latAccel = latAccel + 0.3 * ((Math.random()-0.5)*0.5 - latAccel);
+    fusedSpeed = v;
+    $('gpsRaw').textContent = (v*3.6 + (Math.random()-0.5)).toFixed(1);
+    $('gpsAcc').textContent = '5';
+    lastGps.time = performance.now();
+    $('hz').innerHTML = '20 <small>Hz</small>';
+    updateDisplay();
+  }, 50);
+});
+</script>
+</body>
+</html>
