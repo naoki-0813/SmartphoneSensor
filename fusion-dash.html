@@ -103,10 +103,8 @@
   /* --- 右: G-Gサークル + 数値 --- */
   .col-right { flex:0 0 30%; display:flex; flex-direction:column; padding:10px 12px; gap:8px; min-width:190px; }
   .gg-head { display:flex; justify-content:space-between; font-size:9px; color:var(--dim); letter-spacing:1px; }
-  .gg-head b { color:var(--accel); font-family:var(--digit); font-size:11px; }
-  #gNow { font-family:var(--digit); }
-  .peak-ring { fill:none; stroke:var(--accel); stroke-width:1.3; stroke-dasharray:4 4; opacity:.5; }
-  .peak-dot { fill:none; stroke:var(--accel); stroke-width:2.5; opacity:0; }
+  #gNow { color:var(--text); font-family:var(--digit); }
+  .radar { fill:rgba(255,180,84,0.14); stroke:var(--accel); stroke-width:1.4; stroke-linejoin:round; }
   .gg-wrap { flex:1; display:flex; align-items:center; justify-content:center; position:relative; min-height:0; }
   .gg-wrap svg { width:100%; height:100%; max-height:200px; overflow:visible; }
   .gg-wrap .ring { fill:none; stroke:#1E2840; stroke-width:1.2; }
@@ -115,7 +113,8 @@
   .gg-wrap .rlabel { fill:var(--dim); font-size:8px; font-family:var(--digit); }
   #gdot { transition:none; }
   .gg-dirs { position:absolute; inset:0; pointer-events:none; }
-  .gg-dirs span { position:absolute; font-size:8px; color:var(--dim); letter-spacing:1px; }
+  .gg-dirs span { position:absolute; font-size:8px; color:var(--dim); letter-spacing:1px; display:flex; flex-direction:column; align-items:center; gap:1px; }
+  .gg-dirs b { color:var(--accel); font-family:var(--digit); font-size:11px; font-weight:700; }
   .gg-dirs .t{ top:0; left:50%; transform:translateX(-50%); }
   .gg-dirs .b{ bottom:0; left:50%; transform:translateX(-50%); }
   .gg-dirs .l{ left:0; top:50%; transform:translateY(-50%); }
@@ -181,7 +180,7 @@
 
   <!-- 右: G-Gサークル -->
   <div class="col col-right">
-    <div class="gg-head"><span>G-Gダイアグラム</span><span id="gTotal"><span id="gNow">0.00</span> / MAX <b id="gMax">0.00</b> G</span></div>
+    <div class="gg-head"><span>G-Gダイアグラム(最大保持)</span><span>現在 <span id="gNow">0.00</span> G</span></div>
     <div class="gg-wrap">
       <svg viewBox="-100 -100 200 200">
         <circle class="ring" r="96"/>
@@ -192,12 +191,14 @@
         <text class="rlabel" x="3" y="-30">.2</text>
         <text class="rlabel" x="3" y="-62">.4</text>
         <text class="rlabel" x="3" y="-94">.6</text>
-        <circle id="peakRing" class="peak-ring" r="0"/>
-        <circle id="peakDot" class="peak-dot" r="7" cx="0" cy="0"/>
+        <polygon id="radar" class="radar" points=""/>
         <circle id="gdot" r="11" cx="0" cy="0" fill="#57D4FF"/>
       </svg>
       <div class="gg-dirs">
-        <span class="t">ACCEL</span><span class="b">BRAKE</span><span class="l">L</span><span class="r">R</span>
+        <span class="t">ACCEL<b id="maxAccel">0.00</b></span>
+        <span class="b">BRAKE<b id="maxBrake">0.00</b></span>
+        <span class="l">L<b id="maxLeft">0.00</b></span>
+        <span class="r">R<b id="maxRight">0.00</b></span>
       </div>
     </div>
     <div class="gnums">
@@ -234,7 +235,7 @@ let lastGps={speed:null,time:0,acc:null,prevSpeed:null,prevTime:0};
 let accelBuf=[], stateTimer={state:'stop',since:0};
 let hzCount=0, hzLast=performance.now();
 let calSamples=null, watchId=null, wakeLock=null, demoTimer=null;
-let peakMag=0;   // 計測開始以降の最大合成G
+
 
 // ベクトル小道具
 const dot=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
@@ -374,7 +375,11 @@ function updateCar(g,gLat){
 }
 function setOp(id,v){ const el=$(id); if(el) el.style.opacity=Math.min(0.88,Math.max(0,v)).toFixed(2); }
 
-/* G-Gサークル */
+/* G-Gサークル + 方向別Max(レーダー) */
+const RADAR_N=12;
+let radarBins=new Array(RADAR_N).fill(0);   // 方向ごとの最大半径[px]
+let maxAccel=0,maxBrake=0,maxLeft=0,maxRight=0;
+
 function updateGG(g,gLat){
   const x= clamp1(gLat/GG_FS)*96;
   const y=-clamp1(g/GG_FS)*96;     // accel(+)で上へ
@@ -386,20 +391,37 @@ function updateGG(g,gLat){
   dotEl.setAttribute('fill',`rgb(${lerpColor([87,212,255],[255,59,48],total)})`);
   $('gNow').textContent=mag.toFixed(2);
 
-  // 計測開始以降の最大Gを保持して表示
-  if(mag>peakMag){
-    peakMag=mag;
-    $('peakRing').setAttribute('r', Math.min(96, mag/GG_FS*96).toFixed(1));
-    const pd=$('peakDot');
-    pd.setAttribute('cx',x.toFixed(1)); pd.setAttribute('cy',y.toFixed(1)); pd.style.opacity='1';
-    $('gMax').textContent=peakMag.toFixed(2);
+  // 方向別の最大を保持(レーダー)
+  if(mag>0.02){
+    const vx=gLat, vy=-g;                       // 右+ / 上(加速)+
+    let ang=Math.atan2(vy,vx); if(ang<0) ang+=Math.PI*2;
+    const step=Math.PI*2/RADAR_N;
+    const bin=((Math.round(ang/step)%RADAR_N)+RADAR_N)%RADAR_N;   // 軸に合わせて丸める
+    const r=Math.min(96, mag/GG_FS*96);
+    if(r>radarBins[bin]) radarBins[bin]=r;
+    drawRadar();
   }
+  // 4方向の最大値(数値)
+  if(g>maxAccel){    maxAccel=g;     $('maxAccel').textContent=g.toFixed(2); }
+  if(-g>maxBrake){   maxBrake=-g;    $('maxBrake').textContent=(-g).toFixed(2); }
+  if(gLat>maxRight){ maxRight=gLat;  $('maxRight').textContent=gLat.toFixed(2); }
+  if(-gLat>maxLeft){ maxLeft=-gLat;  $('maxLeft').textContent=(-gLat).toFixed(2); }
 }
-function resetPeak(){
-  peakMag=0;
-  $('peakRing').setAttribute('r','0');
-  $('peakDot').style.opacity='0';
-  $('gMax').textContent='0.00';
+
+function drawRadar(){
+  const step=Math.PI*2/RADAR_N, pts=[];
+  for(let i=0;i<RADAR_N;i++){
+    const th=i*step, rr=radarBins[i];
+    pts.push((rr*Math.cos(th)).toFixed(1)+','+(rr*Math.sin(th)).toFixed(1));
+  }
+  $('radar').setAttribute('points', pts.join(' '));
+}
+
+function resetMax(){
+  radarBins=new Array(RADAR_N).fill(0);
+  maxAccel=maxBrake=maxLeft=maxRight=0;
+  ['maxAccel','maxBrake','maxLeft','maxRight'].forEach(id=>$(id).textContent='0.00');
+  $('radar').setAttribute('points','');
 }
 
 /* 表示更新 */
@@ -445,7 +467,7 @@ async function start(){
       {enableHighAccuracy:true,maximumAge:0,timeout:10000});
     try{ wakeLock=await navigator.wakeLock.request('screen'); }catch(e){}
     try{ if(screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape'); }catch(e){}
-    resetPeak();
+    resetMax();
     running=true;
     $('btnStart').textContent='停止'; $('btnStart').classList.add('running'); $('btnCal').disabled=false;
     $('statusLine').textContent='停車中に CAL を実行してください';
@@ -473,7 +495,7 @@ $('btnDemo').addEventListener('click',()=>{
   $('dotMotion').className='dot on'; $('dotGps').className='dot on'; $('dotCal').className='dot on';
   $('btnStart').textContent='停止'; $('btnStart').classList.add('running');
   $('statusLine').textContent='デモ: 加速→巡航→減速→コーナー';
-  resetPeak();
+  resetMax();
   let t=0,v=0;
   demoTimer=setInterval(()=>{
     t+=0.05; const phase=t%26; let a,lat;
