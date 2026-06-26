@@ -103,6 +103,10 @@
   /* --- 右: G-Gサークル + 数値 --- */
   .col-right { flex:0 0 30%; display:flex; flex-direction:column; padding:10px 12px; gap:8px; min-width:190px; }
   .gg-head { display:flex; justify-content:space-between; font-size:9px; color:var(--dim); letter-spacing:1px; }
+  .gg-head b { color:var(--accel); font-family:var(--digit); font-size:11px; }
+  #gNow { font-family:var(--digit); }
+  .peak-ring { fill:none; stroke:var(--accel); stroke-width:1.3; stroke-dasharray:4 4; opacity:.5; }
+  .peak-dot { fill:none; stroke:var(--accel); stroke-width:2.5; opacity:0; }
   .gg-wrap { flex:1; display:flex; align-items:center; justify-content:center; position:relative; min-height:0; }
   .gg-wrap svg { width:100%; height:100%; max-height:200px; overflow:visible; }
   .gg-wrap .ring { fill:none; stroke:#1E2840; stroke-width:1.2; }
@@ -177,7 +181,7 @@
 
   <!-- 右: G-Gサークル -->
   <div class="col col-right">
-    <div class="gg-head"><span>G-Gダイアグラム</span><span id="gTotal">0.00 G</span></div>
+    <div class="gg-head"><span>G-Gダイアグラム</span><span id="gTotal"><span id="gNow">0.00</span> / MAX <b id="gMax">0.00</b> G</span></div>
     <div class="gg-wrap">
       <svg viewBox="-100 -100 200 200">
         <circle class="ring" r="96"/>
@@ -188,6 +192,8 @@
         <text class="rlabel" x="3" y="-30">.2</text>
         <text class="rlabel" x="3" y="-62">.4</text>
         <text class="rlabel" x="3" y="-94">.6</text>
+        <circle id="peakRing" class="peak-ring" r="0"/>
+        <circle id="peakDot" class="peak-dot" r="7" cx="0" cy="0"/>
         <circle id="gdot" r="11" cx="0" cy="0" fill="#57D4FF"/>
       </svg>
       <div class="gg-dirs">
@@ -228,6 +234,7 @@ let lastGps={speed:null,time:0,acc:null,prevSpeed:null,prevTime:0};
 let accelBuf=[], stateTimer={state:'stop',since:0};
 let hzCount=0, hzLast=performance.now();
 let calSamples=null, watchId=null, wakeLock=null, demoTimer=null;
+let peakMag=0;   // 計測開始以降の最大合成G
 
 // ベクトル小道具
 const dot=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
@@ -374,9 +381,25 @@ function updateGG(g,gLat){
   const dotEl=$('gdot');
   dotEl.setAttribute('cx',x.toFixed(1));
   dotEl.setAttribute('cy',y.toFixed(1));
-  const total=Math.min(1,Math.hypot(g,gLat)/GG_FS);
+  const mag=Math.hypot(g,gLat);
+  const total=Math.min(1,mag/GG_FS);
   dotEl.setAttribute('fill',`rgb(${lerpColor([87,212,255],[255,59,48],total)})`);
-  $('gTotal').textContent=Math.hypot(g,gLat).toFixed(2)+' G';
+  $('gNow').textContent=mag.toFixed(2);
+
+  // 計測開始以降の最大Gを保持して表示
+  if(mag>peakMag){
+    peakMag=mag;
+    $('peakRing').setAttribute('r', Math.min(96, mag/GG_FS*96).toFixed(1));
+    const pd=$('peakDot');
+    pd.setAttribute('cx',x.toFixed(1)); pd.setAttribute('cy',y.toFixed(1)); pd.style.opacity='1';
+    $('gMax').textContent=peakMag.toFixed(2);
+  }
+}
+function resetPeak(){
+  peakMag=0;
+  $('peakRing').setAttribute('r','0');
+  $('peakDot').style.opacity='0';
+  $('gMax').textContent='0.00';
 }
 
 /* 表示更新 */
@@ -422,6 +445,7 @@ async function start(){
       {enableHighAccuracy:true,maximumAge:0,timeout:10000});
     try{ wakeLock=await navigator.wakeLock.request('screen'); }catch(e){}
     try{ if(screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape'); }catch(e){}
+    resetPeak();
     running=true;
     $('btnStart').textContent='停止'; $('btnStart').classList.add('running'); $('btnCal').disabled=false;
     $('statusLine').textContent='停車中に CAL を実行してください';
@@ -449,6 +473,7 @@ $('btnDemo').addEventListener('click',()=>{
   $('dotMotion').className='dot on'; $('dotGps').className='dot on'; $('dotCal').className='dot on';
   $('btnStart').textContent='停止'; $('btnStart').classList.add('running');
   $('statusLine').textContent='デモ: 加速→巡航→減速→コーナー';
+  resetPeak();
   let t=0,v=0;
   demoTimer=setInterval(()=>{
     t+=0.05; const phase=t%26; let a,lat;
