@@ -229,6 +229,7 @@ const $=id=>document.getElementById(id);
 
 let running=false, demoMode=false;
 let gravityVec=null, forwardVec=null, axisConfidence=0;
+let gravityEst=null;   // 重力の常時自動推定(CAL不要の即時反応用)
 let fusedSpeed=0, fwdAccel=0, latAccel=0;
 let lastMotionT=null;
 let lastGps={speed:null,time:0,acc:null,prevSpeed:null,prevTime:0};
@@ -270,17 +271,32 @@ function onMotion(e){
   if(now-hzLast>1000){ $('hz').textContent=hzCount; hzCount=0; hzLast=now; }
 
   if(calSamples){ calSamples.push(raw); return; }
-  if(!gravityVec) return;
+
+  // --- 重力を常時自動推定(CALボタンなしでも即反応) ---
+  if(!gravityEst) gravityEst={x:raw.x,y:raw.y,z:raw.z};
+  else { const k=0.02; gravityEst=add(scale(gravityEst,1-k),scale(raw,k)); }
+  const gv = gravityVec || gravityEst;        // 手動CALがあれば優先、なければ自動
+  if($('dotCal').className==='dot') $('dotCal').className = gravityVec?'dot on':'dot warn';
 
   let lin;
   if(e.acceleration && e.acceleration.x!==null){
     lin = toScreenFrame({x:e.acceleration.x,y:e.acceleration.y,z:e.acceleration.z});
   } else {
-    lin = sub(raw, gravityVec);
+    lin = sub(raw, gv);
   }
 
-  const gHat=unit(gravityVec);
+  const gHat=unit(gv);
   const horiz=sub(lin, scale(gHat, dot(lin,gHat)));   // 水平面に投影
+
+  // --- 前後軸が未学習なら暫定の前方向を決めて即反応 ---
+  // 画面の上方向→水平成分が小さければ画面奥方向、で前を推定。GPSで後から補正/反転。
+  if(!forwardVec){
+    const cands=[{x:0,y:1,z:0}, {x:0,y:0,z:-1}];
+    for(const c of cands){
+      const fc=sub(c, scale(gHat, dot(c,gHat)));
+      if(norm(fc)>0.25){ forwardVec=unit(fc); break; }
+    }
+  }
 
   let f=0,l=0;
   if(forwardVec){
@@ -467,10 +483,14 @@ async function start(){
       {enableHighAccuracy:true,maximumAge:0,timeout:10000});
     try{ wakeLock=await navigator.wakeLock.request('screen'); }catch(e){}
     try{ if(screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape'); }catch(e){}
+    // 計測を新規に開始:学習状態・速度・最大値をリセット(重力は走り出すと自動推定)
+    gravityVec=null; gravityEst=null; forwardVec=null; axisConfidence=0;
+    fusedSpeed=0; lastMotionT=null; accelBuf=[];
+    $('dotCal').className='dot'; $('axisConf').textContent='0';
     resetMax();
     running=true;
     $('btnStart').textContent='停止'; $('btnStart').classList.add('running'); $('btnCal').disabled=false;
-    $('statusLine').textContent='停車中に CAL を実行してください';
+    $('statusLine').textContent='計測中。走り出すと前後軸を自動学習(静止CALで精度UP)';
   }catch(err){ $('statusLine').textContent='開始エラー: '+err.message; }
 }
 function stop(){
@@ -480,8 +500,8 @@ function stop(){
   if(demoTimer){ clearInterval(demoTimer); demoTimer=null; }
   running=false; demoMode=false;
   $('btnStart').textContent='開始'; $('btnStart').classList.remove('running');
-  $('dotMotion').className='dot'; $('dotGps').className='dot';
-  $('statusLine').textContent='停止しました';
+  $('dotMotion').className='dot'; $('dotGps').className='dot'; $('dotCal').className='dot';
+  $('statusLine').textContent='停止しました(最大値は保持中。次の「開始」でリセット)';
 }
 $('btnStart').addEventListener('click',()=>running?stop():start());
 $('btnCal').addEventListener('click',calibrate);
